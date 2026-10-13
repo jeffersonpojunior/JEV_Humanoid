@@ -1,0 +1,37 @@
+# CLM on NVIDIA Jetson (JetPack 6 / L4T r36.x).
+#
+# The base image comes from jetson-containers and already ships torch and vLLM built
+# for the Jetson GPU (Tegra, sm_87). The PyPI wheels do not run there, so CLM is
+# installed with --no-deps and the base's torch/vLLM are pinned while the remaining
+# dependencies are installed.
+#
+# Build it with docker/build_jetson.sh. The default BASE is what `autotag vllm` picks
+# on JetPack 6.2 (L4T r36.4).
+ARG BASE=dustynv/vllm:0.8.6-r36.4-cu128-24.04
+FROM ${BASE}
+
+# The base points pip at pypi.jetson-ai-lab.dev, which is gone (HTTP 410), so every pip
+# call (build isolation included) goes to PyPI; the base's torch/vLLM are pinned below
+# so pip cannot swap them. Ubuntu 24.04 bases mark the system Python as externally
+# managed, and this image is the environment.
+ENV PIP_INDEX_URL=https://pypi.org/simple \
+    PIP_EXTRA_INDEX_URL= \
+    PIP_BREAK_SYSTEM_PACKAGES=1
+
+WORKDIR /CLM
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY train ./train
+COPY tools ./tools
+
+RUN pip freeze | grep -iE '^(torch|torchvision|vllm|triton|numpy)==' > /tmp/pins.txt \
+ && pip install --no-cache-dir -c /tmp/pins.txt \
+        "numpy>=1.24" "requests>=2.28" "fastapi>=0.100" "uvicorn>=0.23" "pyarrow>=14" \
+ && pip install --no-cache-dir --no-deps . \
+ && python3 -c "from importlib.metadata import version as v; print('torch', v('torch'), '| vllm', v('vllm'), '| clm', v('contrastive-lm'))"
+# No `import torch` here: on Jetson the GPU libraries are mounted from the host by the
+# nvidia runtime when the container runs, and `docker build` leaves empty placeholders.
+# Check the GPU at run time instead (docs/CONTAINER_JETSON.md).
+
+EXPOSE 8090 8700
+CMD ["clm-serve"]

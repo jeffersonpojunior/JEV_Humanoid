@@ -1,0 +1,52 @@
+# CLM on a Jetson: the Qwen3-8B encoder (vLLM) and the CLM API, both from the image
+# built by docker/build_jetson.sh. Guide: docs/CONTAINER_JETSON.md
+#
+#   docker compose -f docker/docker-compose.jetson.yml up -d
+#
+# Settings (environment or a .env file next to this file):
+#   CLM_IMAGE   image to run                     (default clm-jetson:latest)
+#   UTIL        vLLM --gpu-memory-utilization    (default 0.7; memory is shared with the CPU)
+#   MAXLEN      vLLM --max-model-len             (default 2048)
+#   CLM_CKPT    checkpoint inside the container, e.g. /CLM/checkpoints/robot.pt
+#               (default: download the reference head)
+#   HF_TOKEN    optional, faster Hugging Face downloads
+#   POOLING     how vLLM is told to embed: "--task embed" (vLLM < 0.10, e.g. the
+#               r36.4 base dustynv/vllm:0.8.6) or "--runner pooling" (newer vLLM)
+services:
+  encoder:
+    image: ${CLM_IMAGE:-clm-jetson:latest}
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    restart: unless-stopped
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    command: >
+      vllm serve Qwen/Qwen3-8B --served-model-name qwen3-8b ${POOLING:---task embed}
+      --enforce-eager --max-num-seqs 32
+      --max-model-len ${MAXLEN:-2048} --gpu-memory-utilization ${UTIL:-0.7} --port 8090
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15m   # first start downloads ~16 GB and loads the weights
+
+  clm:
+    image: ${CLM_IMAGE:-clm-jetson:latest}
+    runtime: nvidia
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      encoder:
+        condition: service_healthy
+    environment:
+      - CLM_CKPT=${CLM_CKPT:-}
+      - CLM_EMB_MAX_TOKENS=${MAXLEN:-2048}
+      - CLM_API_KEY=${CLM_API_KEY:-}
+    volumes:
+      - ${HOME}/.cache/clm:/root/.cache/clm
+      - ../checkpoints:/CLM/checkpoints:ro
+    command: clm-serve
