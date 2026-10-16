@@ -18,9 +18,14 @@ services:
     runtime: nvidia
     network_mode: host
     ipc: host
-    restart: unless-stopped
+    restart: "no"
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
+      # the base image points the cache at /data/models/huggingface; use the mounted one
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_CACHE=/root/.cache/huggingface/hub
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
     command: >
@@ -38,7 +43,7 @@ services:
     image: ${CLM_IMAGE:-clm-jetson:latest}
     runtime: nvidia
     network_mode: host
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       encoder:
         condition: service_healthy
